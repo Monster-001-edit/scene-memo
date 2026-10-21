@@ -1,0 +1,439 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="strict-origin-when-cross-origin">
+<title>場面メモ</title>
+<style>
+  :root { --bg:#fff; --fg:#1d1d1f; --sub:#6e6e73; --line:#d9d9de; --acc:#0a66c2; --card:#f5f5f7; --new:#fff6cc; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#161618; --fg:#f2f2f4; --sub:#9a9aa0; --line:#38383c; --acc:#4da3ff; --card:#222225; --new:#3b3512; }
+  }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--fg); font:15px/1.5 system-ui,"Hiragino Sans","Yu Gothic UI",sans-serif; }
+  main { max-width:1280px; margin:0 auto; padding:16px; }
+  h1 { font-size:20px; margin:0 0 12px; }
+  h2 { font-size:16px; margin:0 0 8px; }
+  .row { display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin:8px 0; }
+  input[type=text] { flex:1; min-width:200px; padding:8px 10px; border:1px solid var(--line); border-radius:8px; background:var(--bg); color:var(--fg); font:inherit; }
+  button, select { padding:8px 12px; border:1px solid var(--line); border-radius:8px; background:var(--card); color:var(--fg); font:inherit; cursor:pointer; }
+  button:hover { border-color:var(--acc); }
+  button.primary { background:var(--acc); border-color:var(--acc); color:#fff; }
+
+  /* 広い画面: 左に動画、右に場面一覧(スクロールせずにメモを書ける) */
+  .layout { display:grid; gap:20px; grid-template-columns:minmax(0,1fr); }
+  @media (min-width: 980px) {
+    .layout { grid-template-columns:minmax(0,1.6fr) minmax(340px,1fr); align-items:start; }
+    .right { position:sticky; top:16px; max-height:calc(100vh - 32px); overflow-y:auto; padding-right:4px; }
+  }
+
+  #player-wrap { position:relative; width:100%; aspect-ratio:16/9; background:#000; border-radius:10px; overflow:hidden; }
+  #player-wrap iframe { position:absolute; inset:0; width:100%; height:100%; }
+  #seek { width:100%; margin:10px 0 0; }
+  .time { font-variant-numeric:tabular-nums; color:var(--sub); }
+  .range { padding:8px 12px; background:var(--card); border-radius:8px; font-variant-numeric:tabular-nums; }
+  .hint { color:var(--sub); font-size:13px; margin:6px 0; }
+  #msg { color:var(--acc); min-height:1.5em; }
+  kbd { padding:1px 5px; border:1px solid var(--line); border-radius:4px; background:var(--card); font:12px ui-monospace,Consolas,monospace; }
+
+  ol { padding:0; margin:0 0 12px; list-style:none; }
+  li { display:grid; gap:6px; padding:10px; border:1px solid var(--line); border-radius:8px; margin-bottom:8px; }
+  li.fresh { background:var(--new); }
+  li .top { display:flex; gap:8px; align-items:center; }
+  li .t { font-variant-numeric:tabular-nums; cursor:pointer; color:var(--acc); flex:1; }
+  li label { display:grid; grid-template-columns:4.5em 1fr; gap:8px; align-items:center; font-size:13px; color:var(--sub); }
+  li input { padding:6px 8px; border:1px solid var(--line); border-radius:6px; background:var(--bg); color:var(--fg); font:inherit; min-width:0; width:100%; }
+  li button { padding:4px 10px; }
+  .empty { color:var(--sub); font-size:14px; padding:8px 0; }
+
+  textarea { width:100%; min-height:160px; padding:10px; border:1px solid var(--line); border-radius:8px; background:var(--card); color:var(--fg); font:13px/1.5 ui-monospace,Consolas,monospace; }
+  .export { margin-top:24px; }
+  .warn { background:var(--new); border:1px solid var(--line); border-radius:8px; padding:10px 12px; margin-bottom:12px; }
+  #videos { margin:4px 0; }
+  #videos:empty { display:none; }
+  button.vchip { padding:4px 12px; }
+  button.vchip.current { background:var(--acc); border-color:var(--acc); color:#fff; }
+  #videos .vtitle { color:var(--sub); font-size:13px; flex:1; min-width:150px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .vtag { font-size:12px; padding:1px 8px; border-radius:10px; border:1px solid var(--line); background:var(--card); color:var(--sub); white-space:nowrap; }
+  .listhead { display:flex; justify-content:space-between; align-items:center; gap:8px; margin-bottom:8px; }
+  .listhead h2 { margin:0; }
+  button.danger { color:#c62828; border-color:#c62828; background:transparent; padding:4px 12px; }
+  button.danger:hover { background:#c62828; color:#fff; }
+  @media (prefers-color-scheme: dark) { button.danger { color:#ff8a80; border-color:#ff8a80; } button.danger:hover { background:#c62828; color:#fff; } }
+</style>
+</head>
+<body>
+<main>
+  <h1>場面メモ</h1>
+  <div id="warn" class="warn" hidden></div>
+
+  <div class="layout">
+    <section class="left">
+      <div class="row">
+        <input type="text" id="url" placeholder="YouTubeのURLを貼り付け">
+        <button class="primary" id="load">読み込む</button>
+      </div>
+      <div id="msg"></div>
+      <div class="row" id="videos"></div>
+
+      <div id="player-wrap"><div id="player"></div></div>
+      <input type="range" id="seek" min="0" max="1" step="0.1" value="0">
+      <div class="row">
+        <span class="time" id="now">0:00.0</span>
+        <span class="time">/</span>
+        <span class="time" id="dur">0:00.0</span>
+      </div>
+
+      <div class="row">
+        <button data-step="-5">−5秒 (↓)</button>
+        <button data-step="-1">−1秒</button>
+        <button data-step="-0.1">−0.1秒 (←)</button>
+        <button id="play">再生 / 停止</button>
+        <button data-step="0.1">+0.1秒 (→)</button>
+        <button data-step="1">+1秒</button>
+        <button data-step="5">+5秒 (↑)</button>
+        <select id="rate" aria-label="再生速度">
+          <option value="0.25">0.25倍</option>
+          <option value="0.5">0.5倍</option>
+          <option value="1" selected>1倍</option>
+          <option value="1.5">1.5倍</option>
+          <option value="2">2倍</option>
+        </select>
+      </div>
+      <p class="hint">
+        <kbd>Space</kbd>再生/停止 ・ <kbd>←</kbd><kbd>→</kbd>0.1秒 ・ <kbd>Shift</kbd>+<kbd>←</kbd><kbd>→</kbd>1秒 ・
+        <kbd>↑</kbd><kbd>↓</kbd>5秒 ・ <kbd>[</kbd>開始 ・ <kbd>]</kbd>終了 ・ <kbd>Enter</kbd>追加 ・
+        メモ入力中は <kbd>Enter</kbd> で入力を終えてショートカットに戻る
+      </p>
+
+      <div class="row">
+        <button id="setStart">開始をここに [</button>
+        <button id="setEnd">終了をここに ]</button>
+        <span class="range" id="range">開始 -- / 終了 --</span>
+        <button class="primary" id="add">一覧に追加 ↵</button>
+      </div>
+    </section>
+
+    <section class="right">
+      <div class="listhead">
+        <h2>場面一覧(新しい順)</h2>
+        <button id="clear" class="danger">全部削除</button>
+      </div>
+      <ol id="list"></ol>
+    </section>
+  </div>
+
+  <section class="export">
+    <h2>書き出し(Claude CodeまたはCoworkに貼り付ける)</h2>
+    <textarea id="out" readonly></textarea>
+    <div class="row">
+      <button class="primary" id="copy">コピー</button>
+    </div>
+  </section>
+
+  <datalist id="titles"></datalist>
+</main>
+
+<script src="https://www.youtube.com/iframe_api"></script>
+<script>
+let player = null, ready = false, dragging = false;
+let startT = null, endT = null;
+let clips = [];          // {id, s, e, title, telop} 新しいものが先頭
+let seq = 0;
+let lastTitle = "";      // 直前に使った題名(次の場面に自動で入る)
+let freshId = null;
+let videos = [];         // {id, url, title} 読み込んだ順(動画の番号 = 順番 + 1)
+let curVid = "";         // いま開いている動画のID
+const $ = id => document.getElementById(id);
+const videoNo = id => videos.findIndex(v => v.id === id) + 1;   // 見つからなければ0
+
+function fmt(t) {
+  if (t == null || isNaN(t)) return "--";
+  const h = Math.floor(t / 3600), m = Math.floor(t % 3600 / 60), s = t % 60;
+  const ss = s.toFixed(1).padStart(4, "0");
+  return (h ? h + ":" + String(m).padStart(2, "0") : m) + ":" + ss;
+}
+function say(s) { $("msg").textContent = s; }
+
+function videoId(u) {
+  try {
+    const x = new URL(u.trim());
+    if (x.hostname.includes("youtu.be")) return x.pathname.slice(1).split("/")[0];
+    if (x.searchParams.get("v")) return x.searchParams.get("v");
+    const p = x.pathname.split("/").filter(Boolean);
+    if (["shorts", "live", "embed"].includes(p[0])) return p[1];
+  } catch (e) {}
+  return null;
+}
+
+function onYouTubeIframeAPIReady() { window.apiReady = true; }
+
+const apiOk = () => !!(window.YT && window.YT.Player);
+
+// URL欄の動画を開く。初めての動画なら「動画N」として一覧に加える
+function load() {
+  const url = $("url").value.trim();
+  const id = videoId(url);
+  if (!id) { say("URLからIDを読み取れませんでした。"); return; }
+  if (!apiOk()) { say("YouTubeの読み込み中です。数秒後にもう一度押してください。"); return; }
+  let v = videos.find(x => x.id === id);
+  if (!v) { v = { id, url, title: "" }; videos.push(v); }
+  openVideo(v, 0);
+}
+
+// 動画を切り替える(startは開始秒)。切り替え時は、指定途中の開始・終了を捨てる
+function openVideo(v, start) {
+  if (!apiOk()) { say("YouTubeの読み込み中です。数秒後にもう一度押してください。"); return; }
+  const changed = v.id !== curVid;
+  curVid = v.id; $("url").value = v.url;
+  say(changed && (startT != null || endT != null) ? "動画を切り替えたので、開始・終了の指定はリセットしました。" : "");
+  startT = endT = null; updateRange();
+  lastSeek = { t: start || 0, at: Date.now() };
+  if (player) {
+    if (changed || start) player.loadVideoById({ videoId: v.id, startSeconds: start || 0 });
+  } else {
+    const vars = { playsinline: 1, rel: 0 };
+    if (location.protocol.startsWith("http")) vars.origin = location.origin;
+    player = new YT.Player("player", {
+      videoId: v.id, width: "100%", height: "100%", playerVars: vars,
+      events: {
+        onReady: () => { ready = true; },
+        onError: e => say(e.data === 153
+          ? "エラー153: このページの開き方が原因の可能性が高いです。ファイルを直接開かず、「場面メモ_起動.bat」から開いてください。"
+          : "再生できません(エラー " + e.data + ")。埋め込み禁止の動画か、非公開の可能性があります。")
+      }
+    });
+  }
+  renderVideos(); output(); save();
+}
+
+// 読み込んだ動画の切り替えボタン(動画1・動画2…)
+function renderVideos() {
+  const box = $("videos"); box.innerHTML = "";
+  if (!videos.length) return;
+  videos.forEach((v, i) => {
+    const b = document.createElement("button");
+    b.className = "vchip" + (v.id === curVid ? " current" : "");
+    b.textContent = "動画" + (i + 1); b.title = v.url + (v.title ? "\n" + v.title : "");
+    b.onclick = () => { b.blur(); openVideo(v, 0); };
+    box.append(b);
+  });
+  const cv = videos.find(v => v.id === curVid);
+  const s = document.createElement("span");
+  s.className = "vtitle";
+  s.textContent = cv ? (cv.title || cv.url) : "動画を選んで「読み込む」を押してください";
+  s.title = "別の動画を足すには、URLを貼り替えて「読み込む」を押します";
+  box.append(s);
+}
+
+// seek直後はgetCurrentTimeの更新が遅れるため、直近のseek先を0.6秒間だけ優先する
+let lastSeek = { t: 0, at: 0 };
+function cur() {
+  if (!ready) return 0;
+  return Date.now() - lastSeek.at < 600 ? lastSeek.t : player.getCurrentTime();
+}
+function seekTo(t) {
+  if (!ready) return;
+  const d = player.getDuration() || 0;
+  const target = Math.max(0, Math.min(d || t, t));
+  lastSeek = { t: target, at: Date.now() };
+  player.seekTo(target, true);
+}
+function step(dt) { seekTo(cur() + dt); }
+
+setInterval(() => {
+  if (!ready) return;
+  const d = player.getDuration() || 0;
+  $("seek").max = d || 1;
+  $("dur").textContent = fmt(d);
+  const t = cur();
+  $("now").textContent = fmt(t);
+  if (!dragging) $("seek").value = t;
+  // 動画のタイトルが取れたら、動画リストと書き出しに反映する
+  const vd = player.getVideoData && player.getVideoData();
+  const cv = vd && videos.find(v => v.id === vd.video_id);
+  if (cv && vd.title && cv.title !== vd.title) { cv.title = vd.title; renderVideos(); output(); save(); }
+}, 100);
+
+$("seek").addEventListener("pointerdown", () => dragging = true);
+$("seek").addEventListener("pointerup", () => dragging = false);
+$("seek").addEventListener("input", e => { seekTo(parseFloat(e.target.value)); $("now").textContent = fmt(parseFloat(e.target.value)); });
+
+function updateRange() { $("range").textContent = "開始 " + fmt(startT) + " / 終了 " + fmt(endT); }
+function setStart() { startT = Math.round(cur() * 10) / 10; updateRange(); }
+function setEnd() { endT = Math.round(cur() * 10) / 10; updateRange(); }
+
+function add() {
+  if (!curVid) { say("先に動画を読み込んでください。"); return; }
+  if (startT == null || endT == null) { say("開始と終了の両方を決めてください。"); return; }
+  if (endT <= startT) { say("終了は開始より後にしてください。"); return; }
+  const c = { id: ++seq, vid: curVid, s: startT, e: endT, title: lastTitle, telop: "" };
+  clips.unshift(c);                // 一番上に追加
+  freshId = c.id;
+  startT = endT = null; updateRange(); say("");
+  render();
+  // 題名が引き継がれていればテロップ、なければ題名の入力欄にカーソルを置く
+  const li = document.querySelector('li[data-id="' + c.id + '"]');
+  if (li) li.querySelector(c.title ? ".telop" : ".title").focus();
+  $("list").parentElement.scrollTop = 0;
+}
+
+function render() {
+  const ol = $("list"); ol.innerHTML = "";
+  if (!clips.length) {
+    const p = document.createElement("div");
+    p.className = "empty"; p.textContent = "まだ場面がありません。開始と終了を決めて「一覧に追加」を押してください。";
+    ol.append(p);
+  }
+  clips.forEach(c => {
+    const li = document.createElement("li");
+    li.dataset.id = c.id;
+    if (c.id === freshId) li.className = "fresh";
+
+    const top = document.createElement("div"); top.className = "top";
+    const vt = document.createElement("span");
+    vt.className = "vtag"; vt.textContent = videoNo(c.vid) ? "動画" + videoNo(c.vid) : "動画?";
+    const t = document.createElement("span");
+    t.className = "t"; t.title = "クリックで開始位置へ移動(別の動画なら切り替えます)";
+    t.textContent = fmt(c.s) + " – " + fmt(c.e) + "(" + (c.e - c.s).toFixed(1) + "秒)";
+    t.onclick = () => {
+      const v = videos.find(x => x.id === c.vid);
+      if (v && v.id !== curVid) openVideo(v, c.s); else seekTo(c.s);
+    };
+    const del = document.createElement("button");
+    del.textContent = "削除"; del.onclick = () => { clips = clips.filter(x => x.id !== c.id); render(); };
+    top.append(vt, t, del);
+
+    const lt = document.createElement("label"); lt.append("題名");
+    const ti = document.createElement("input");
+    ti.className = "title"; ti.setAttribute("list", "titles"); ti.value = c.title; ti.placeholder = "例: ディフェンス課題";
+    ti.oninput = () => { c.title = ti.value; lastTitle = ti.value; output(); save(); };
+    ti.onchange = () => { refreshTitles(); };
+    lt.append(ti);
+
+    const ln = document.createElement("label"); ln.append("テロップ");
+    const te = document.createElement("input");
+    te.className = "telop"; te.value = c.telop; te.placeholder = "例: ヘルプが遅れて失点";
+    te.oninput = () => { c.telop = te.value; output(); save(); };
+    ln.append(te);
+
+    [ti, te].forEach(inp => inp.addEventListener("keydown", e => {
+      if (e.key === "Enter") { e.preventDefault(); inp.blur(); refreshTitles(); }
+    }));
+
+    li.append(top, lt, ln); ol.append(li);
+  });
+  refreshTitles(); output(); save();
+}
+
+function refreshTitles() {
+  const set = [...new Set(clips.map(c => c.title.trim()).filter(Boolean))];
+  $("titles").innerHTML = set.map(s => "<option value=\"" + s.replace(/"/g, "&quot;") + "\">").join("");
+}
+
+function ts(t) {
+  const h = Math.floor(t / 3600), m = Math.floor(t % 3600 / 60), s = t % 60;
+  return String(h).padStart(2, "0") + ":" + String(m).padStart(2, "0") + ":" + s.toFixed(1).padStart(4, "0");
+}
+
+// 題名が同じ場面を1本の動画にまとめる形で書き出す
+function output() {
+  const groups = new Map();
+  [...clips].sort((a, b) => a.id - b.id).forEach(c => {
+    const k = c.title.trim() || "(題名なし)";
+    if (!groups.has(k)) groups.set(k, []);
+    groups.get(k).push(c);
+  });
+  // 場面で使っている動画だけを載せる(場面がまだ無いときは、読み込んだ動画すべて)
+  const used = clips.length ? videos.filter(v => clips.some(c => c.vid === v.id)) : videos;
+  const lines = [
+    "以下の指定で動画を作ってください。",
+    "・題名ごとに1本の動画にまとめる(題名を動画のファイル名にする。動画の中にタイトルカードは付けない)",
+    "・各場面には、「|」の右側のテロップを表示する",
+    "・場面は、各題名の中で「動画の番号 → 時間」の順に並べる",
+    "・各場面の「動画N」は、下の「元の動画」の番号に対応する",
+    "",
+    "元の動画:"
+  ];
+  if (!used.length) lines.push("  (未入力)");
+  used.forEach(v => lines.push("  動画" + videoNo(v.id) + ": " + v.url + (v.title ? "(" + v.title + ")" : "")));
+  lines.push("");
+  groups.forEach((arr, k) => {
+    arr.sort((a, b) => (videoNo(a.vid) - videoNo(b.vid)) || (a.s - b.s));
+    lines.push("## 題名: " + k + "(" + arr.length + "場面)");
+    arr.forEach((c, i) => lines.push((i + 1) + ". 動画" + (videoNo(c.vid) || "?") + " " + ts(c.s) + " - " + ts(c.e) + " | " + (c.telop || "(テロップなし)")));
+    lines.push("");
+  });
+  $("out").value = lines.join("\n").trimEnd();
+}
+
+function save() { try { localStorage.setItem("clipmarker2", JSON.stringify({ videos, clips, lastTitle })); } catch (e) {} }
+function restore() {
+  try {
+    let d = JSON.parse(localStorage.getItem("clipmarker2") || "null");
+    if (!d) {            // 旧版(メモ1欄)のデータを引き継ぐ
+      const old = JSON.parse(localStorage.getItem("clipmarker") || "null");
+      if (old) d = { videoUrl: old.videoUrl, clips: (old.clips || []).map(c => ({ s: c.s, e: c.e, title: "", telop: c.note || "" })).reverse(), lastTitle: "" };
+    }
+    if (d) {
+      lastTitle = d.lastTitle || "";
+      // 古い保存データ(動画URLが1つだけ)は、「動画1」として引き継ぐ
+      videos = d.videos || (d.videoUrl && videoId(d.videoUrl) ? [{ id: videoId(d.videoUrl), url: d.videoUrl, title: "" }] : []);
+      clips = (d.clips || []).map(c => ({ id: c.id || ++seq, vid: c.vid || (videos[0] ? videos[0].id : ""), s: c.s, e: c.e, title: c.title || "", telop: c.telop || "" }));
+      seq = Math.max(seq, ...clips.map(c => c.id), 0);
+      if (videos.length) $("url").value = videos[videos.length - 1].url;
+    }
+  } catch (e) {}
+  renderVideos();
+  render();
+}
+
+$("load").onclick = load;
+$("url").addEventListener("keydown", e => { if (e.key === "Enter") load(); });
+document.querySelectorAll("[data-step]").forEach(b => b.onclick = () => step(parseFloat(b.dataset.step)));
+$("play").onclick = () => { if (!ready) return; player.getPlayerState() === 1 ? player.pauseVideo() : player.playVideo(); };
+$("rate").onchange = e => { if (ready) player.setPlaybackRate(parseFloat(e.target.value)); };
+$("setStart").onclick = setStart; $("setEnd").onclick = setEnd; $("add").onclick = add;
+$("copy").onclick = async () => {
+  try { await navigator.clipboard.writeText($("out").value); say("コピーしました。"); }
+  catch (e) { $("out").select(); document.execCommand("copy"); say("コピーしました。"); }
+};
+$("clear").onclick = () => {
+  if (!clips.length) { say("消す場面がありません。"); return; }
+  const msg = "一覧の " + clips.length + " 件をすべて消しますか?(元に戻せません)" +
+    (videos.length > 1 ? "\n読み込み済みの動画リストも、いま開いている動画以外は消えます。" : "");
+  if (confirm(msg)) {
+    clips = []; lastTitle = "";
+    videos = videos.filter(v => v.id === curVid);    // 開いている動画だけ残し、「動画1」に振り直す
+    renderVideos(); render(); say("全部削除しました。");
+  }
+};
+
+// ボタンやセレクトを押した後はフォーカスを外し、ショートカットが二重に働かないようにする
+document.querySelectorAll("button, select").forEach(b => b.addEventListener("click", () => b.blur()));
+$("rate").addEventListener("change", () => $("rate").blur());
+
+document.addEventListener("keydown", e => {
+  const tag = (e.target.tagName || "").toLowerCase();
+  if (tag === "input" && e.target.type !== "range" || tag === "textarea" || tag === "select") return;
+  if (e.key === " ") { e.preventDefault(); $("play").click(); }
+  else if (e.key === "ArrowLeft") { e.preventDefault(); step(e.shiftKey ? -1 : -0.1); }
+  else if (e.key === "ArrowRight") { e.preventDefault(); step(e.shiftKey ? 1 : 0.1); }
+  else if (e.key === "ArrowUp") { e.preventDefault(); step(5); }
+  else if (e.key === "ArrowDown") { e.preventDefault(); step(-5); }
+  else if (e.key === "[") setStart();
+  else if (e.key === "]") setEnd();
+  else if (e.key === "Enter") add();
+});
+
+// ファイルを直接開く(file://)と、YouTubeが埋め込みを断る(エラー153)ため、先に知らせる
+if (location.protocol === "file:") {
+  $("warn").hidden = false;
+  $("warn").textContent = "このページはファイルを直接開いた状態です。この開き方だと、YouTubeの動画が「エラー153」で再生できません。同じフォルダの「場面メモ_起動.bat」をダブルクリックして開き直してください。";
+}
+
+restore(); updateRange();
+</script>
+</body>
+</html>
